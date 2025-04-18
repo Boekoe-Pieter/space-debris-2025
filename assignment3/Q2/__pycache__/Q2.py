@@ -11,6 +11,7 @@ import ConjunctionUtilities as ConjUtil
 
 from mpl_toolkits.mplot3d import Axes3D 
 from tudatpy import constants,astro
+from tudatpy.astro import element_conversion
 
 from matplotlib.animation import FuncAnimation
 from scipy.optimize import least_squares
@@ -44,18 +45,23 @@ Dec = Yk_array[:, 2]
 time_days_2 = (meas_dict['tk_list'] - meas_dict['tk_list'][0]) / constants.JULIAN_DAY
 time_minutes_2 = time_days_2*24*3600
 
-def plot_measurements(slant_range,Ra,Dec,time_minutes_2):
+def plot_measurements(slant_range, Ra, Dec, time_minutes_2):
     print(f'''--------------------------------------------------------------------------------------------------------------''')
-    print('Plottig radar measurements....')
+    print('Plotting radar measurements....')
     fig, axs = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
 
+    # Plot Slant Range
     axs[0].scatter(time_minutes_2, slant_range, color='tab:blue', s=15, label='Slant Range')
     axs[0].set_ylabel("Slant Range [m]", fontsize=12)
     axs[0].legend()
     axs[0].grid(True)
 
+
+    # Plot RA, Dec and Unwrapped RA
     axs[1].scatter(time_minutes_2, np.rad2deg(Ra), color='tab:orange', s=15, label='RA [deg]')
     axs[1].scatter(time_minutes_2, np.rad2deg(Dec), color='tab:green', s=15, label='Dec [deg]')
+    # axs[1].plot(time_minutes_2, unwrapped_ra_deg, color='tab:red', linestyle='--', linewidth=1.5, label='Unwrapped RA [deg]')
+    
     axs[1].set_ylabel("Angle [deg]", fontsize=12)
     axs[1].set_xlabel("Time [seconds]", fontsize=12)
     axs[1].legend()
@@ -63,10 +69,11 @@ def plot_measurements(slant_range,Ra,Dec,time_minutes_2):
 
     plt.suptitle("Measurements Over Time", fontsize=14)
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig('assignment3/images/measurements.png',dpi=300)
+    plt.savefig('assignment3/images/measurements.png', dpi=300)
     plt.show()
 
-# plot_measurements(slant_range,Ra,Dec,time_minutes_2)
+
+plot_measurements(slant_range,Ra,Dec,time_minutes_2)
 
 '''
 Define propagation data
@@ -776,6 +783,86 @@ print(f'vel norm: {np.linalg.norm(last_state[3:])}')
 print(f'final state: {post_mannouvre_state}')
 print(f'pos norm: {np.linalg.norm(post_mannouvre_state[:3])}')
 print(f'vel norm: {np.linalg.norm(post_mannouvre_state[3:])}')
+# print(f'''--------------------------------------------------------------------------------------------------------------''')
+# print("Performing LSQ from Q4 estimate positions and velocities of the new orbit....")
+# print(f'''--------------------------------------------------------------------------------------------------------------''')
+# print("r1:", r_eci_array[0])
+# print("r2:", r_eci_array[jump_indices[0]])
+# print("dt:",  tk_array[jump_indices[0]] - tk_array[0])
+
+# def lambert_solver(r1, r2, dt, mu):
+#     r1, r2 = r1.flatten(), r2.flatten()
+#     r1_norm, r2_norm = np.linalg.norm(r1), np.linalg.norm(r2)
+#     cos_dnu = np.dot(r1, r2) / (r1_norm * r2_norm)
+#     sin_dnu = np.sign(np.cross(r1, r2)[-1]) * np.sqrt(1 - cos_dnu**2)
+#     A = sin_dnu * np.sqrt(r1_norm * r2_norm / (1 - cos_dnu))
+#     z = 1.0
+#     for _ in range(50):
+#         C = (1 - np.cos(np.sqrt(z))) / z if z > 1e-6 else 0.5 - z / 24
+#         S = (np.sqrt(z) - np.sin(np.sqrt(z))) / (np.sqrt(z)**3) if z > 1e-6 else 1/6 - z / 120
+#         y = r1_norm + r2_norm + A * (z * S - 1) / np.sqrt(C)
+#         F = (y / C)**1.5 * S + A * np.sqrt(y) - np.sqrt(mu) * dt
+#         dFdz = (y / C)**1.5 * (1 / (2 * z) * (C - 3 * S / (2 * C)) + 3 * S**2 / (4 * C)) + A / 8 * (3 * S / C * np.sqrt(y) + A * np.sqrt(C / y))
+#         dz = F / dFdz if abs(dFdz) > 1e-10 else 0
+#         z -= dz
+#         if abs(dz) < 1e-8:
+#             break
+#     if z < 0 or np.isnan(z):
+#         return (r2 - r1) / dt
+#     chi = np.sqrt(z)
+#     alpha = 1 - z * r1_norm / mu
+#     v1 = (r2 - r1 * (1 - chi**2 * C / alpha)) / (np.sqrt(mu) * dt * np.sqrt(C) / chi)
+#     if np.any(np.isnan(v1)) or np.any(np.isinf(v1)):
+#         return (r2 - r1) / dt
+#     return v1
+
+# mu = bodies.get("Earth").gravitational_parameter
+# dt = tk_array[jump_indices[0]] - tk_array[0]
+# v1 = lambert_solver(r_eci_array[0], r_eci_array[jump_indices[0]], dt, mu)
+# X0_guess = np.hstack((r_eci_array[0], v1))
+
+# print("X0_guess:", X0_guess)
+
+# def residuals(X0, t0, meas_dict, sensor, state_params, int_params, bodies):
+#     resids = []
+#     for tk, Yk in zip(meas_dict['tk_list'], meas_dict['Yk_list']):
+#         if tk == t0:
+#             Xk = X0.reshape(6, 1)
+#         else:
+#             tvec = [t0, tk]
+#             tout, Xout = prop.propagate_orbit(X0, tvec, state_params, int_params, bodies)
+#             Xk = Xout[-1, :].reshape(6, 1)
+#         Y_pred = EstUtil.compute_measurement(tk, Xk, sensor, bodies)
+#         res = (Yk - Y_pred).flatten()
+#         for j, mtype in enumerate(sensor['meas_types']):
+#             res[j] /= sensor['sigma_dict'][mtype]
+#         resids.extend(res)
+#     return np.array(resids)
+
+# result = least_squares(residuals, X0_guess, args=(tk_array[0], meas_dict, sensor_params, state_params, int_params, bodies), method='lm')
+# X0_est = result.x.reshape(6, 1)
+# # J = result.jac
+
+# # sigma_list = [sensor_params['sigma_dict'][mtype] for mtype in sensor_params['meas_types']]
+# # W = np.diag([1 / sigma**2 for sigma in sigma_list for _ in range(len(tk_list))])
+# # P0 = np.linalg.inv(J.T @ W @ J + 1e-6 * np.eye(6))
+
+# # print("Eigenvalues of P0:", np.linalg.eigvals(P0))
+
+# elements = element_conversion.cartesian_to_keplerian(X0_est, mu)
+# print("Q4(a) Results:")
+# print("Keplerian Elements:", elements)
+# print("State at t0:", X0_est.flatten())
+# # print("Covariance:", P0)
+
+# R_earth = 6371e3
+# perigee = elements[0] * (1 - elements[1])
+# if perigee < R_earth:
+#     print("Perigee below Earth surface")
+
+# print("\nQ4(b) Results:")
+# print("State at t0:", X0_est.flatten())
+# # print("Covariance:", P0)
 print(f'''--------------------------------------------------------------------------------------------------------------''')
 print("Computing required dV via back propagation for second method")
 print(f'''--------------------------------------------------------------------------------------------------------------''')

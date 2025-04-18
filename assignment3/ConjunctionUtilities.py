@@ -429,11 +429,6 @@ def compute_TCA(X1, X2, trange, rso1_params, rso2_params, int_params,
     tmin = 0.
     while b <= trange[1]:
         
-        print('')
-        print('current interval [t0, tf]')
-        print(a, b)
-        print('dt [sec]', b-a)
-        print('dt total [hours]', (b-trange[0])/3600.)
     
         # Determine Chebyshev-Gauss-Lobato node locations
         tvec = compute_CGL_nodes(a, b, N)

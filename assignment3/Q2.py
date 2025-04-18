@@ -119,7 +119,7 @@ Perform the kalman filter for data visualization
 '''
 print(f'''--------------------------------------------------------------------------------------------------------------''')
 print('Running UKF ....')
-filter_output= EstUtil.ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodies,cutoff=410)
+filter_output= EstUtil.ukf_altered(state_params, meas_dict, sensor_params, int_params, filter_params, bodies,cutoff=410)
 time_steps = list(filter_output.keys())
 
 residuals = []
@@ -397,7 +397,7 @@ jump_indices_debug = np.where(dt_list_debug > 10)[0]
 fifth_jump_debug = jump_indices_debug[4] #==> manually via measurements
 target_epoch_debug = meas_dict_debug['tk_list'][fifth_jump_debug + 1] 
 target_index_debug = np.where(meas_dict_debug['tk_list'] == target_epoch_debug)[0][0]
-filter_output_debug = EstUtil.ukf(state_params_debug, meas_dict_debug, sensor_params_debug, int_params, filter_params, bodies,cutoff=258)
+filter_output_debug = EstUtil.ukf_altered(state_params_debug, meas_dict_debug, sensor_params_debug, int_params, filter_params, bodies,cutoff=258)
 
 time_steps_debug = list(filter_output_debug.keys())
 for tk_debug in time_steps_debug:

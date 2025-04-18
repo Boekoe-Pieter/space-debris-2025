@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 # Load data
-meas_file = r"C:\Users\kiira\OneDrive\Desktop\Aerospace\Q3\Space Debris\Assignment 3\space-debris-2025\assignment3\data\group1\q4_meas_iod_99001.pkl"
+meas_file = r"assignment3/data/group1/q4_meas_iod_99001.pkl"
 state_params, meas_dict, sensor = EstUtil.read_measurement_file(meas_file)
 
 tk_list = meas_dict['tk_list']
@@ -114,7 +114,7 @@ print("\nQ4(b) Results:")
 print("State at t0:", X0_est.flatten())
 print("Covariance:", P0)
 
-rso_file = r"C:\Users\kiira\OneDrive\Desktop\Aerospace\Q3\Space Debris\Assignment 3\space-debris-2025\assignment3\data\group1\estimated_rso_catalog.pkl"
+rso_file = r"assignment3/data/group1/estimated_rso_catalog.pkl"
 rso_dict = ConjUtil.read_catalog_file(rso_file)
 oo_id = list(rso_dict.keys())[0]
 oo_params = rso_dict[oo_id].copy()

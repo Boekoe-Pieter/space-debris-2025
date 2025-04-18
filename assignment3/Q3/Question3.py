@@ -10,7 +10,7 @@ from matplotlib.ticker import AutoMinorLocator
 # ---------------------------
 # DATA LOADING CONFIGURATION
 # ---------------------------
-DATA_DIR = "/Users/rodrigoalves/Documents/GitHub/space-debris-2025/assignment3/data/group1"
+DATA_DIR = "assignment3/data/group1"
 OPTICAL_PATH = os.path.join(DATA_DIR, "q3_optical_meas_objchar_91452.pkl")
 RADAR_PATH = os.path.join(DATA_DIR, "q3_radar_meas_objchar_91452.pkl")
 

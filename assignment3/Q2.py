@@ -430,6 +430,28 @@ LSQ method to estimate position and velocities between the sparse data.
 print(f'''--------------------------------------------------------------------------------------------------------------''')
 print("Performing LSQ to estimate positions and velocities of the new orbit....")
 print(f'''--------------------------------------------------------------------------------------------------------------''')
+def compute_radar_from_r_eci(r_eci, sensor_params, tk_array, bodies):
+    sensor_ecef = sensor_params['sensor_ecef']
+    Yk_list = []
+    for r_eci, tk in zip(r_eci_array, tk_array):
+            # Convert sensor from ECEF to ECI at time tk
+            ecef2eci = bodies.get("Earth").rotation_model.body_fixed_to_inertial_rotation(tk)
+            sensor_eci = np.dot(ecef2eci, sensor_ecef).flatten()
+
+            # Line-of-sight vector
+            rho_vec = r_eci - sensor_eci
+            rg = np.linalg.norm(rho_vec)
+            rho_hat = rho_vec / rg
+
+            # Dec and RA
+            dec = np.arcsin(rho_hat[2])
+            ra = np.arctan2(rho_hat[1], rho_hat[0])
+
+            Yk_list.append([rg, ra, dec])
+    return np.array(Yk_list)
+
+#already filtered from previous analysis, so starts on the first new orbit radar measurement
+Radar_observations = np.array(meas_dict['Yk_list'][:jump_indices[0]])
 
 #states at the beginning of the lambert arc
 observed_state_begin = np.array([
@@ -460,12 +482,12 @@ epoch_e = np.array([
 ])
 
 int_params = {}
-int_params['tudat_integrator'] = 'rkf78'
+int_params['tudat_integrator'] = 'rk4'
 int_params['step'] = 10
-int_params['max_step'] = 1000.
-int_params['min_step'] = 0.0001
-int_params['rtol'] = 1e-12
-int_params['atol'] = 1e-12
+# int_params['max_step'] = 1000.
+# int_params['min_step'] = 0.0001
+# int_params['rtol'] = 1e-12
+# int_params['atol'] = 1e-12
 
 current_obj = rso_dict[91000]
 rso_params = {
@@ -481,22 +503,36 @@ rso_params = {
 
 #propagate the states
 def propagate_state(initial_state, epoch0, target_epochs, rso_params, int_params):
-    """Propagate from initial_state (6D) to each target_epoch."""
+    """Propagate from initial_state (6D) to each target_epoch and convert states to radar obs."""
     results = []
+    ECEF_radar = []
+
     for epoch in target_epochs:
         t_vec = [epoch0, epoch]
         full_state_history = prop.propagate_orbit(initial_state, t_vec, rso_params, int_params)
-        final_state = full_state_history[1][-1,:]
+
+        final_state = full_state_history[1][-1, :]
         results.append(final_state)
-    return np.array(results).flatten()
+
+        radar_conversion = compute_radar_from_r_eci(
+            full_state_history[1][:, :3], sensor_params, full_state_history[0], bodies
+        )
+        ECEF_radar.append(radar_conversion)
+
+    return np.array(results).flatten(), np.vstack(ECEF_radar)
+
 
 #cost function for the LSQ
 def cost_function(state_guess):
     init_state = np.array(state_guess)
-    predicted = propagate_state(init_state, epoch_b[0], epoch_e, rso_params, int_params)
-    residual = predicted - observed_state_end.flatten()
-    weight = np.array([1e-3, 1e-3, 1e-3, 1, 1, 1])  # Adjust as needed
-    return residual * weight
+    predicted_state_end, predicted_radar = propagate_state(init_state, epoch_b[0], epoch_e, rso_params, int_params)
+    
+    Radar_obs_flat = np.squeeze(Radar_observations) 
+
+    # state_residual = predicted_state_end - observed_state_end.flatten()
+    radar_residual = (predicted_radar[-1] - Radar_obs_flat).flatten()
+
+    return np.concatenate([ radar_residual])
 
 
 initial_guess = lambert_first_arc_initial_state.flatten()
@@ -518,11 +554,8 @@ result = least_squares(
 best_state = result.x
 best_position = best_state[:3]
 best_velocity = best_state[3:]
-
 # J = result.jac
 # cov = np.linalg.inv(J.T @ J)
-
-
 print("Best-fit position:", best_position, 'm')
 print("Best-fit velocity:", best_velocity, 'm/s')
 print("Position norm:", np.linalg.norm(best_position), 'm')
@@ -569,6 +602,9 @@ propagated_data['post-manouvre'] = {
 3D plot and animation to visualize whats going on
 '''
 def plot_3d_orbit_all(propagated_data):
+    print(f'''--------------------------------------------------------------------------------------------------------------''')
+    print("Creating a 3D plot")
+    print(f'''--------------------------------------------------------------------------------------------------------------''')
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
 

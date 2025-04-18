@@ -10,11 +10,42 @@ from tudatpy.numerical_simulation import propagation_setup
 from tudatpy.astro.time_conversion import DateTime
 from tudatpy.astro import element_conversion
 from tudatpy.util import result2array
+from tudatpy import constants, numerical_simulation
+from tudatpy.astro import element_conversion, two_body_dynamics
+from tudatpy.data import save2txt
+from tudatpy.interface import spice
+from tudatpy.numerical_simulation import (
+    environment,
+    environment_setup,
+    estimation_setup,
+    propagation,
+    propagation_setup,
+)
 
 # Load spice kernels
 spice.load_standard_kernels()
 
 
+def lambert_targerter(initial_position, final_position, arrival_epoch, departure_epoch, bodies):
+    mu = bodies.get_body("Earth").gravitational_parameter
+
+    tof = arrival_epoch - departure_epoch #(arrival_epoch - departure_epoch)*constants.JULIAN_DAY
+    lambertTargeter = two_body_dynamics.LambertTargeterIzzo(
+        initial_position,
+        final_position,
+        tof,
+        mu,
+    )
+
+    lambert_arc_initial_state = np.zeros(6)
+    lambert_arc_initial_state[:3] = initial_position
+    lambert_arc_initial_state[3:] = lambertTargeter.get_departure_velocity()
+
+    lambert_arc_final_state = np.zeros(6)
+    lambert_arc_final_state[:3] = final_position
+    lambert_arc_final_state[3:] = lambertTargeter.get_arrival_velocity()
+
+    return lambert_arc_initial_state, lambert_arc_final_state
 
 
 def tudat_initialize_bodies(bodies_to_create=[]):

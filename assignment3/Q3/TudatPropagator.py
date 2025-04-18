@@ -10,42 +10,11 @@ from tudatpy.numerical_simulation import propagation_setup
 from tudatpy.astro.time_conversion import DateTime
 from tudatpy.astro import element_conversion
 from tudatpy.util import result2array
-from tudatpy import constants, numerical_simulation
-from tudatpy.astro import element_conversion, two_body_dynamics
-from tudatpy.data import save2txt
-from tudatpy.interface import spice
-from tudatpy.numerical_simulation import (
-    environment,
-    environment_setup,
-    estimation_setup,
-    propagation,
-    propagation_setup,
-)
 
 # Load spice kernels
 spice.load_standard_kernels()
 
 
-def lambert_targerter(initial_position, final_position, arrival_epoch, departure_epoch, bodies):
-    mu = bodies.get_body("Earth").gravitational_parameter
-
-    tof = arrival_epoch - departure_epoch #(arrival_epoch - departure_epoch)*constants.JULIAN_DAY
-    lambertTargeter = two_body_dynamics.LambertTargeterIzzo(
-        initial_position,
-        final_position,
-        tof,
-        mu,
-    )
-
-    lambert_arc_initial_state = np.zeros(6)
-    lambert_arc_initial_state[:3] = initial_position
-    lambert_arc_initial_state[3:] = lambertTargeter.get_departure_velocity()
-
-    lambert_arc_final_state = np.zeros(6)
-    lambert_arc_final_state[:3] = final_position
-    lambert_arc_final_state[3:] = lambertTargeter.get_arrival_velocity()
-
-    return lambert_arc_initial_state, lambert_arc_final_state
 
 
 def tudat_initialize_bodies(bodies_to_create=[]):
@@ -281,65 +250,10 @@ def propagate_orbit(Xo, tvec, state_params, int_params, bodies=None):
 
 
 def propagate_state_and_covar(Xo, Po, tvec, state_params, int_params, bodies=None, alpha=1e-4):
-    '''
-    This function propagates an orbit using physical parameters provided in 
-    state_params and integration parameters provided in int_params. It also
-    propagates the Gaussian covariance matrix using the Unscented transform.
     
-    This function is suitable to use as the prediction step in the UKF. It can
-    also be used as a stand-alone method to propagate a state and covariance.
-    
-    Note that this will only work for 6 element state vector, if drag or SRP 
-    coefficient are included for estimation it will require modification.
-        
-    Parameters
-    ------
-    Xo : 6x1 numpy array
-        Cartesian state vector [m, m/s]
-    tvec : list or numpy array
-        propagator will only use first and last terms to set the initial and
-        final time of the propagation, intermediate times are ignored
-        
-        [t0, ..., tf] given as time in seconds since J2000
-        
-    state_params : dictionary
-        propagator parameters
-        
-        fields:
-            Cd: float, drag coefficient
-            Cr: float, reflectivity coefficient
-            area: float [m^2]
-            mass: float [kg]
-            sph_deg: int, spherical harmonics expansion degree for Earth
-            sph_ord: int, spherical harmonics expansion order for Earth
-            central_bodies: list of central bodies for propagator ["Earth"]
-            bodies_to_create: list of bodies to create ["Earth", "Sun", "Moon"]
-            
-    int_params : dictionary
-        numerical integration parameters
-        
-    bodies : tudat object, optional
-        contains parameters for the environment bodies used in propagation
-        if None, will initialize with bodies given in state_params
-        
-    alpha: float, optional (default=1e-4)
-        UKF sigma point spread parameter, should be in range [1e-4, 1]
-        
-    Returns
-    ------
-    tf : float
-        final time in seconds since J2000
-    Xf : nx1 numpy array
-        Cartesian state at final time [m, m/s]   
-    Pf : nxn numpy array
-        Gaussian covariance matrix at final time [m^2, m^2/s^2]
-    
-    '''
-    
-    
-    # Compute sigma point weights
+    # Sigma point weights 
     n = len(Xo)
-    beta = 2.   # Gaussian distribution/Least Squares cost
+    beta = 2.
     kappa = 3. - n
     lam = alpha**2.*(n + kappa) - n
     gam = np.sqrt(n + lam)
@@ -349,169 +263,130 @@ def propagate_state_and_covar(Xo, Po, tvec, state_params, int_params, bodies=Non
     Wc = np.insert(Wc, 0, lam/(n + lam) + (1 - alpha**2 + beta))
     diagWc = np.diag(Wc)
     
-    # Initial state and sigma points
+    # Sigma point generation 
     sqP = np.linalg.cholesky(Po)
     Xrep = np.tile(Xo, (1, n))
     chi = np.concatenate((Xo, Xrep+(gam*sqP), Xrep-(gam*sqP)), axis=1)
-    chi_v = np.reshape(chi, (n*(2*n+1), 1), order='F')
     
-    # TODO: Note that this will work only for 6 element state vector, if other
-    # parameters are included such as drag or SRP coefficient, this function
-    # will require modification
-    initial_state = chi_v.flatten()
+    # Parameter extraction 
+    dyn_params = state_params.copy()  
+    phys_vars = chi[6:8,:] 
+    area_const = dyn_params['area']  
+    mass_const = dyn_params['mass'] 
     
-    # Retrieve input parameters
-    central_bodies = state_params['central_bodies']
-    bodies_to_create = state_params['bodies_to_create']
-    mass = state_params['mass']
-    Cd = state_params['Cd']
-    Cr = state_params['Cr']
-    area = state_params['area']
-    sph_deg = state_params['sph_deg']
-    sph_ord = state_params['sph_ord']
+    # Initialize storage for propagated points 
+    propagated_states = np.zeros((n, 2*n+1))  
     
-    # Simulation start and end
-    simulation_start_epoch = tvec[0]
-    simulation_end_epoch = tvec[-1]
-    
-    # Setup bodies
-    if bodies is None:
-        bodies = tudat_initialize_bodies(bodies_to_create)
-    
-    
-    # Create the bodies to propagate
-    # TUDAT always uses 6 element state vector
-    N = int(len(initial_state)/n)
-    central_bodies = central_bodies*N
-    bodies_to_propagate = []
-    for jj in range(N):
-        jj_str = str(jj)
-        bodies.create_empty_body(jj_str)
-        bodies.get(jj_str).mass = mass
-        bodies_to_propagate.append(jj_str)
+    for point_idx in range(2*n+1): 
+        # Current sigma point 
+        curr_point = chi[:, point_idx]  
+        pos_vel = curr_point[:6] 
+        drag_coeff = curr_point[6]  
+        reflect_coeff = curr_point[7] 
         
-        if Cd > 0.:
-            aero_coefficient_settings = environment_setup.aerodynamic_coefficients.constant(
-                area, [Cd, 0, 0]
+        # Body setup 
+        if bodies is None:
+            env_bodies = tudat_initialize_bodies(dyn_params['bodies_to_create'])
+        else:
+            env_bodies = bodies
+            
+        # Create unique body for this propagation 
+        body = f"prop_body_{point_idx}"  
+        env_bodies.create_empty_body(body)
+        env_bodies.get(body).mass = mass_const
+        
+        # Aerodynamic setup 
+        if drag_coeff > 0.:
+            drag_config = environment_setup.aerodynamic_coefficients.constant(
+                area_const, [drag_coeff, 0, 0]  
             )
             environment_setup.add_aerodynamic_coefficient_interface(
-                bodies, jj_str, aero_coefficient_settings)
+                env_bodies, body, drag_config)
             
-        if Cr > 0.:
-            # occulting_bodies = ['Earth']
-            # radiation_pressure_settings = environment_setup.radiation_pressure.cannonball(
-            #     'Sun', srp_area_m2, Cr, occulting_bodies
-            # )
-            # environment_setup.add_radiation_pressure_interface(
-            #     bodies, jj_str, radiation_pressure_settings)
-            
-            occulting_bodies_dict = dict()
-            occulting_bodies_dict[ "Sun" ] = [ "Earth" ]
-            
-            radiation_pressure_settings = environment_setup.radiation_pressure.cannonball_radiation_target(
-                area, Cr, occulting_bodies_dict )
-            
+        # Radiation pressure 
+        if reflect_coeff > 0.:
+            shadow_bodies = {"Sun": ["Earth"]}  
+            srp_config = environment_setup.radiation_pressure.cannonball_radiation_target(
+                area_const, reflect_coeff, shadow_bodies  
+            )
             environment_setup.add_radiation_pressure_target_model(
-                bodies, jj_str, radiation_pressure_settings)
+                env_bodies, body, srp_config)
+        
+        # Acceleration setup 
+        accel_models = {}
+        accel_models[body] = {}
+        
+        if 'Earth' in dyn_params['bodies_to_create']:
+            if dyn_params['sph_deg'] == 0 and dyn_params['sph_ord'] == 0:
+                accel_models[body]['Earth'] = [
+                    propagation_setup.acceleration.point_mass_gravity()
+                ]
+            else:
+                accel_models[body]['Earth'] = [
+                    propagation_setup.acceleration.spherical_harmonic_gravity(
+                        dyn_params['sph_deg'], dyn_params['sph_ord'])
+                ]
+            if drag_coeff > 0.:
+                accel_models[body]['Earth'].append(
+                    propagation_setup.acceleration.aerodynamic()
+                )
+                
+        if 'Sun' in dyn_params['bodies_to_create']:
+            accel_models[body]['Sun'] = [
+                propagation_setup.acceleration.point_mass_gravity()
+            ]
+            if reflect_coeff > 0.:
+                accel_models[body]['Sun'].append(
+                    propagation_setup.acceleration.radiation_pressure()
+                )
+                
+        if 'Moon' in dyn_params['bodies_to_create']:
+            accel_models[body]['Moon'] = [
+                propagation_setup.acceleration.point_mass_gravity()
+            ]
             
-
-    acceleration_settings_setup = {}        
-    if 'Earth' in bodies_to_create:
+        # Create models 
+        acceleration_models = propagation_setup.create_acceleration_models(
+            env_bodies, accel_models, [body], ["Earth"])
+            
+        # Integrator setup 
+        if int_params['tudat_integrator'] == 'rk4':
+            integrator = propagation_setup.integrator.runge_kutta_4(
+                int_params['step'])
+        elif int_params['tudat_integrator'] == 'rkf78':
+            integrator = propagation_setup.integrator.runge_kutta_variable_step_size(
+                int_params['step'],
+                propagation_setup.integrator.CoefficientSets.rkf_78,
+                int_params['min_step'],
+                int_params['max_step'],
+                int_params['rtol'],
+                int_params['atol'])
+                
+        # Propagation 
+        stop_condition = propagation_setup.propagator.time_termination(
+            tvec[-1], terminate_exactly_on_final_condition=True)
+            
+        setup = propagation_setup.propagator.translational(
+            ["Earth"],
+            acceleration_models,
+            [body],
+            pos_vel,
+            tvec[0],
+            integrator,
+            stop_condition)
+            
+        dynamics_results = numerical_simulation.create_dynamics_simulator(
+            env_bodies, setup)
+        final_states = result2array(dynamics_results.state_history)
         
-        # Gravity
-        if sph_deg == 0 and sph_ord == 0:
-            acceleration_settings_setup['Earth'] = [propagation_setup.acceleration.point_mass_gravity()]
-        else:
-            acceleration_settings_setup['Earth'] = [propagation_setup.acceleration.spherical_harmonic_gravity(sph_deg, sph_ord)]
-        
-        # Aerodynamic Drag
-        if Cd > 0.:                
-            acceleration_settings_setup['Earth'].append(propagation_setup.acceleration.aerodynamic())
-        
-    if 'Sun' in bodies_to_create:
-        
-        # Gravity
-        acceleration_settings_setup['Sun'] = [propagation_setup.acceleration.point_mass_gravity()]
-        
-        # Solar Radiation Pressure
-        if Cr > 0.:                
-            #acceleration_settings_setup['Sun'].append(propagation_setup.acceleration.cannonball_radiation_pressure())
-            acceleration_settings_setup['Sun'].append(propagation_setup.acceleration.radiation_pressure())
+        propagated_states[:, point_idx] = np.concatenate([
+            final_states[-1, 1:7],  # Position/velocity
+            [drag_coeff, reflect_coeff]  # Estimated parameters
+        ])
     
-    if 'Moon' in bodies_to_create:
-        
-        # Gravity
-        acceleration_settings_setup['Moon'] = [propagation_setup.acceleration.point_mass_gravity()]
+    # Compute final state and covariance 
+    Xf = np.dot(propagated_states, Wm.reshape(-1, 1))
+    diff = propagated_states - np.dot(Xf, np.ones((1, 2*n+1)))
+    Pf = np.dot(diff, np.dot(diagWc, diff.T))
     
-
-    acceleration_settings = {}
-    for jj in range(N):
-        acceleration_settings[str(jj)] = acceleration_settings_setup
-        
-    acceleration_models = propagation_setup.create_acceleration_models(
-        bodies, acceleration_settings, bodies_to_propagate, central_bodies
-    )
-    
-
-    # Create termination settings
-    termination_condition = propagation_setup.propagator.time_termination(
-        simulation_end_epoch, terminate_exactly_on_final_condition=True
-    )
-
-
-    # Create numerical integrator settings
-    if int_params['tudat_integrator'] == 'rk4':
-        fixed_step_size = int_params['step']
-        integrator_settings = propagation_setup.integrator.runge_kutta_4(
-            fixed_step_size
-        )
-        
-    elif int_params['tudat_integrator'] == 'rkf78':
-        initial_step_size = int_params['step']
-        maximum_step_size = int_params['max_step']
-        minimum_step_size = int_params['min_step']
-        rtol = int_params['rtol']
-        atol = int_params['atol']
-        integrator_settings = propagation_setup.integrator.runge_kutta_variable_step_size(
-            initial_step_size,
-            propagation_setup.integrator.CoefficientSets.rkf_78,
-            minimum_step_size,
-            maximum_step_size,
-            rtol,
-            atol)
-    
-        
-        
-    # Create propagation settings
-    propagator_settings = propagation_setup.propagator.translational(
-        central_bodies,
-        acceleration_models,
-        bodies_to_propagate,
-        initial_state,
-        simulation_start_epoch,
-        integrator_settings,
-        termination_condition
-    )
-    
-    dynamics_simulator = numerical_simulation.create_dynamics_simulator(
-        bodies, propagator_settings )
-
-    # Extract the resulting state history and convert it to an ndarray
-    states = dynamics_simulator.state_history
-    states_array = result2array(states)        
-    
-    
-    tf = states_array[-1,0]
-    chi_v = states_array[-1,1:]
-    
-    # Compute mean and covariance at final time using unscented transform
-    chi = np.reshape(chi_v, (n, 2*n+1), order='F')
-    mean = np.dot(chi, Wm.T)
-    mean = np.reshape(mean, (n, 1))
-    chi_diff = chi - np.dot(mean, np.ones((1, (2*n+1))))
-    Pf = np.dot(chi_diff, np.dot(diagWc, chi_diff.T))
-    
-    # Output single mean state not computed average of sigma points
-    Xf = chi_v[0:6].reshape(6,1)
-    
-    return tf, Xf, Pf
+    return tvec[-1], Xf, Pf

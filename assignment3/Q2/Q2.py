@@ -57,7 +57,7 @@ def plot_measurements(slant_range,Ra,Dec,time_minutes_2):
     axs[1].scatter(time_minutes_2, np.rad2deg(Ra), color='tab:orange', s=15, label='RA [deg]')
     axs[1].scatter(time_minutes_2, np.rad2deg(Dec), color='tab:green', s=15, label='Dec [deg]')
     axs[1].set_ylabel("Angle [deg]", fontsize=12)
-    axs[1].set_xlabel("Time [minutes]", fontsize=12)
+    axs[1].set_xlabel("Time [seconds]", fontsize=12)
     axs[1].legend()
     axs[1].grid(True)
 
@@ -71,10 +71,6 @@ def plot_measurements(slant_range,Ra,Dec,time_minutes_2):
 '''
 Define propagation data
 '''
-propagated_data = {}
-t0 = (datetime(2025, 4, 1, 12, 0, 0) - datetime(2000, 1, 1, 12, 0, 0)).total_seconds()
-t_vec = np.array([t0,t0+24*3600])
-
 int_params = {}
 int_params['tudat_integrator'] = 'rkf78'
 int_params['step'] = 10.
@@ -109,35 +105,27 @@ filter_params['Qric'] = Qric
 filter_params['alpha'] = 1.
 filter_params['gap_seconds'] = 600.
 
-int_params = {}
-int_params['tudat_integrator'] = 'rkf78'
-int_params['step'] = 10.
-int_params['max_step'] = 1000.
-int_params['min_step'] = 1e-3
-int_params['rtol'] = 1e-12
-int_params['atol'] = 1e-12
-
 bodies_to_create = ['Earth', 'Sun', 'Moon']
 bodies = prop.tudat_initialize_bodies(bodies_to_create)
 '''
 Perform the kalman filter for data visualization
 '''
-# print(f'''--------------------------------------------------------------------------------------------------------------''')
-# print('Running UKF for initial data visualization....')
-# filter_output= EstUtil.ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodies,cutoff=410)
-# time_steps = list(filter_output.keys())
+print(f'''--------------------------------------------------------------------------------------------------------------''')
+print('Running UKF ....')
+filter_output= EstUtil.ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodies,cutoff=410)
+time_steps = list(filter_output.keys())
 
-# residuals = []
-# covariance = []
-# state_list = []
+residuals = []
+covariance = []
+state_list = []
 
-# for tk in time_steps:
-#     resids = filter_output[tk]['resids']
-#     covar = filter_output[tk]['covar'] 
-#     states = filter_output[tk]['state'] 
-#     residuals.append(resids.flatten()) 
-#     covariance.append(covar) 
-#     state_list.append(states.flatten()) 
+for tk in time_steps:
+    resids = filter_output[tk]['resids']
+    covar = filter_output[tk]['covar'] 
+    states = filter_output[tk]['state'] 
+    residuals.append(resids.flatten()) 
+    covariance.append(covar) 
+    state_list.append(states.flatten()) 
 
 def plot_kalman(meas_dict,states_array,residuals,covariance,cuttoff):
     '''
@@ -185,7 +173,7 @@ def plot_kalman(meas_dict,states_array,residuals,covariance,cuttoff):
     axs[1].scatter(time_minutes, np.rad2deg(residuals[:, 1]), label=labels[1], color=colors[1], s=15, alpha=0.7)
     axs[1].scatter(time_minutes, np.rad2deg(residuals[:, 2]), label=labels[2], color=colors[2], s=15, alpha=0.7)
     axs[1].set_ylabel("Angle [deg]", fontsize=12)
-    axs[1].set_xlabel("Time [minutes]", fontsize=12)
+    axs[1].set_xlabel("Time [seconds]", fontsize=12)
     axs[1].legend()
     axs[1].grid(True)
     plt.legend()
@@ -206,7 +194,7 @@ def plot_kalman(meas_dict,states_array,residuals,covariance,cuttoff):
     axs[1].scatter(time_minutes, np.rad2deg(residuals[:, 1]), label=labels[1], color=colors[1], s=15, alpha=0.7)
     axs[1].scatter(time_minutes, np.rad2deg(residuals[:, 2]), label=labels[2], color=colors[2], s=15, alpha=0.7)
     axs[1].set_ylabel("Angle [deg]", fontsize=12)
-    axs[1].set_xlabel("Time [minutes]", fontsize=12)
+    axs[1].set_xlabel("Time [seconds]", fontsize=12)
     axs[1].legend()
     axs[1].grid(True)
     axs[1].set_yscale('log')
@@ -342,7 +330,6 @@ lambert_first_arc_initial_state,lambert_first_arc_final_state = prop.lambert_tar
         tk_array[0],
         bodies
     )
-print(tk_array[0])
 lambert_second_arc_initial_state,lambert_second_arc_final_state = prop.lambert_targerter(
         r_eci_array[jump_indices[0]+1],
         r_eci_array[jump_indices[1]],
@@ -518,13 +505,12 @@ print("Position norm:", np.linalg.norm(best_position), 'm')
 print("Velocity norm:", np.linalg.norm(best_velocity), 'm/s')
 # print("covariance", cov)
 # print("standard deviation", np.array([np.sqrt(np.diag(cov))])  )
-
 '''
 Computing dV by finding the needed velocity to go to the last radar measurement via the lambert targetter,
 annd substract initial vs needed velocity.
 '''
 print(f'''--------------------------------------------------------------------------------------------------------------''')
-print("Computing required dV")
+print("Computing required dV via lambert targetter")
 print(f'''--------------------------------------------------------------------------------------------------------------''')
 initial_state,final_state = prop.lambert_targerter(
         manouvre_begin_state[:3].flatten(), best_state[:3], tk_array[jump_indices[0]], manoeuvre_epoch, bodies
@@ -539,25 +525,320 @@ print(f'dV vector {Change} [m/s]')
 print(f'dV in RNT vector {dv_RSW} [m/s]')
 print(f'dV norm {np.linalg.norm(Change)} [m/s]')
 print(f'dV in RNT norm {np.linalg.norm(dv_RSW)} [m/s]')
-'''
-Propagate object 91000 with TUDAT
-save the data in propagated_data under the post mannouvre name
-'''
+print(f'''--------------------------------------------------------------------------------------------------------------''')
+print("Computing required dV via back propagation")
+print(f'''--------------------------------------------------------------------------------------------------------------''')
+int_params = {}
+int_params['tudat_integrator'] = 'rk4'
+int_params['step'] = -10.
+t_vec = [tk_array[0], manoeuvre_epoch]
+
+full_state_history = prop.propagate_orbit(best_state, t_vec, rso_params, int_params)
+Final_state = full_state_history[1][-1,:]
+
+Velocity_needed = np.array(Final_state[3:]).flatten()
+Velocity_currennt = np.array(manouvre_begin_state[3:]).flatten()
+Change = Velocity_needed-Velocity_currennt
+RSW_matrix = astro.frame_conversion.inertial_to_rsw_rotation_matrix(Final_state)
+dv_RSW = np.dot(RSW_matrix.T, Change)
+
+print(f'dV vector {Change} [m/s]')
+print(f'dV in RTN vector {dv_RSW} [m/s]')
+print(f'dV norm {np.linalg.norm(Change)} [m/s]')
+print(f'dV in RTN norm {np.linalg.norm(dv_RSW)} [m/s]')
+print(f'''--------------------------------------------------------------------------------------------------------------''')
+print("Second method only using UKF pre-maneouvre data")
+print(f'''--------------------------------------------------------------------------------------------------------------''')
+print('Running UKF until and including manveouvre')
+'''Just running it again to be sure'''
+int_params = {}
+int_params['tudat_integrator'] = 'rkf78'
+int_params['step'] = 10.
+int_params['max_step'] = 1000.
+int_params['min_step'] = 1e-3
+int_params['rtol'] = 1e-12
+int_params['atol'] = 1e-12
+
+Qeci = 1e-12*np.diag([1., 1., 1.])
+Qric = 1e-12*np.diag([1., 1., 1.])
+
+filter_params = {}
+filter_params['Qeci'] = Qeci
+filter_params['Qric'] = Qric
+filter_params['alpha'] = 1.
+filter_params['gap_seconds'] = 600.
+
+bodies_to_create = ['Earth', 'Sun', 'Moon']
+bodies = prop.tudat_initialize_bodies(bodies_to_create)
+
+state_params, meas_dict, sensor_params = EstUtil.read_measurement_file(means_maneuver)
+filter_output,manoeuvre_epoch = EstUtil.ukf_manouvre(state_params, meas_dict, sensor_params, int_params, filter_params, bodies)
+time_steps = list(filter_output.keys())
+
+residuals = []
+covariance = []
+state_list = []
+
+for tk in time_steps:
+    resids = filter_output[tk]['resids']
+    covar = filter_output[tk]['covar'] 
+    states = filter_output[tk]['state'] 
+    residuals.append(resids.flatten()) 
+    covariance.append(covar) 
+    state_list.append(states.flatten()) 
+
+for idx, tk in enumerate(meas_dict['tk_list']):
+    if tk >= manoeuvre_epoch:
+        break
+
+# plot_kalman(meas_dict,np.array(state_list),residuals,covariance,cuttoff=-1)
+manouvre_begin_state  = filter_output[manoeuvre_epoch]['state'] 
+estimated_state = np.array(manouvre_begin_state)
+estimated_covariance = np.array(covariance)[-1]
+print('Running UKF post manveouvre with higher covariance')
+'''run UKF from manouvre+dt'''
+covariance_mulitplier = [10**6, 10**8, 10**10] 
+state_params = {
+    'epoch_tdb': 796815370.0,   
+    'state': estimated_state,
+    'covar': estimated_covariance*10**10,
+    'mass': 120.0,           
+    'area': 1.2,             
+    'Cd': 2.1,               
+    'Cr': 1.0,               
+    'sph_deg': 8,
+    'sph_ord': 8,
+    'central_bodies': ['Earth'],
+    'bodies_to_create': ['Earth', 'Sun', 'Moon']
+}
+
+filter_output = EstUtil.ukf_2(state_params, meas_dict, sensor_params, int_params, filter_params, bodies, start=idx)
+time_steps = list(filter_output.keys())
+
+residuals = []
+covariance = []
+state_list = []
+
+for tk in time_steps:
+    resids = filter_output[tk]['resids']
+    covar = filter_output[tk]['covar'] 
+    states = filter_output[tk]['state'] 
+    residuals.append(resids.flatten()) 
+    covariance.append(covar) 
+    state_list.append(states.flatten()) 
+
+
+def plot_kalman_post_man(meas_dict,states_array,residuals,covariance,start):
+    '''
+    plots for the kaleman filter
+    '''
+    print(f'''--------------------------------------------------------------------------------------------------------------''')
+    print('Plottig UKF measurements....')
+    residuals = np.array(residuals)
+
+    time_days = (meas_dict['tk_list'][start:] - meas_dict['tk_list'][start]) / constants.JULIAN_DAY
+    time_minutes = time_days*24*3600
+    pos_norm = np.linalg.norm(states_array[:, :3], axis=1)
+    vel_norm = np.linalg.norm(states_array[:, 3:], axis=1)
+
+    plt.figure(figsize=(10, 5))
+    plt.scatter(time_minutes,pos_norm, label='Position Norm') 
+    plt.title("Position Norm Over iteration post maneouvre")
+    plt.xlabel("time [Sec]")
+    plt.ylabel("||r|| (residual norm)")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig('assignment3/images/position_norm_plot_kalman_post_man.png',dpi=300)
+    plt.show()
+
+    plt.figure(figsize=(10, 5))
+    plt.scatter(time_minutes,vel_norm, label='Velocity Norm') 
+    plt.title("Velocity Norm Over iteration post maneouvre")
+    plt.xlabel("time [Sec]")
+    plt.ylabel("||V||")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig('assignment3/images/velocity_norm_plot_kalman_post_man.png',dpi=300)
+    plt.show()
+
+    residuals = np.array(residuals)
+    labels = ["Slant Range Residual", "RA Residual (deg)", "Dec Residual (deg)"]
+    colors = ["tab:blue", "tab:orange", "tab:green"]
+    fig, axs = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+    axs[0].scatter(time_minutes, residuals[:, 0], label=labels[0], color=colors[0], s=15, alpha=0.7)
+    axs[0].set_ylabel("Slant Range  [m]", fontsize=12)
+    axs[0].legend()
+    axs[0].grid(True)
+
+    axs[1].scatter(time_minutes, np.rad2deg(residuals[:, 1]), label=labels[1], color=colors[1], s=15, alpha=0.7)
+    axs[1].scatter(time_minutes, np.rad2deg(residuals[:, 2]), label=labels[2], color=colors[2], s=15, alpha=0.7)
+    axs[1].set_ylabel("Angle [deg]", fontsize=12)
+    axs[1].set_xlabel("Time [seconds]", fontsize=12)
+    axs[1].legend()
+    axs[1].grid(True)
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig('assignment3/images/residual_plot_kalman_post_man.png',dpi=300)
+    plt.show()
+
+    labels = ["Slant Range Residual", "RA Residual (deg)", "Dec Residual (deg)"]
+    colors = ["tab:blue", "tab:orange", "tab:green"]
+    fig, axs = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+    axs[0].scatter(time_minutes, residuals[:, 0], label=labels[0], color=colors[0], s=15, alpha=0.7)
+    axs[0].set_ylabel("Slant Range [m]", fontsize=12)
+    axs[0].legend()
+    axs[0].grid(True)
+
+    axs[1].scatter(time_minutes, np.rad2deg(residuals[:, 1]), label=labels[1], color=colors[1], s=15, alpha=0.7)
+    axs[1].scatter(time_minutes, np.rad2deg(residuals[:, 2]), label=labels[2], color=colors[2], s=15, alpha=0.7)
+    axs[1].set_ylabel("Angle [deg]", fontsize=12)
+    axs[1].set_xlabel("Time [seconds]", fontsize=12)
+    axs[1].legend()
+    axs[1].grid(True)
+    axs[1].set_yscale('log')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig('assignment3/images/residual_log_plot_kalman_post_man.png',dpi=300)
+    plt.show()
+
+    innovation_norm = np.linalg.norm(residuals, axis=1)
+    plt.figure(figsize=(10, 5))
+    plt.scatter(time_minutes,innovation_norm, label='Innovation Norm') 
+    plt.title("Innovation Norm Over Time post maneouvre")
+    plt.xlabel("time [Sec]")
+    plt.ylabel("||Yk - Ȳk|| (residual norm)")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig('assignment3/images/innovation_norm_plot_kalman_post_man.png',dpi=300)
+    plt.show()
+
+    plt.figure(figsize=(10, 5))
+    plt.scatter(time_minutes,innovation_norm, label='Innovation Norm') 
+    plt.title("Innovation Norm Over Time")
+    plt.xlabel("time [Sec]")
+    plt.ylabel("||Yk - Ȳk|| (residual norm)")
+    plt.legend()
+    plt.yscale('log')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig('assignment3/images/innovation_norm_log_plot_kalman_post_man.png',dpi=300)
+    plt.show()
+    '''
+    The covariance trace is the sum of the variances annd shows if the uncertainty is growing
+    '''
+
+    cov_trace = [np.trace(P_k) for P_k in covariance]  
+    plt.figure(figsize=(10, 5))
+    plt.scatter(time_minutes,cov_trace)
+    plt.title("Covariance Matrix Trace Over Tim post maneouvre")
+    plt.xlabel("time [Sec]")
+    plt.ylabel("Trace(P)")
+    plt.grid(True)
+    plt.savefig('assignment3/images/covariance trace_plot_kalman_post_man.png',dpi=300)
+    plt.show()
+
+    stds = np.array([np.sqrt(np.diag(P)) for P in covariance])  
+    plt.figure(figsize=(10, 5))
+    for i in range(stds.shape[1]):
+        plt.scatter(time_minutes,stds[:, i], label=f"σ_{i}")
+
+    plt.title("Standard Deviation of States Over Time post maneouvre")
+    plt.xlabel("time [Sec]")
+    plt.ylabel("Standard Deviation")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig('assignment3/images/deviation_plot_kalman_post_man.png',dpi=300)
+    plt.show()
+
+# plot_kalman_post_man(meas_dict,np.array(state_list),np.array(residuals),np.array(covariance),start=idx)
+states = np.array(state_list)
+tk_array = np.array(meas_dict['tk_list'])
+last_state = states[-1]
+
+for idx, tk in enumerate(meas_dict['tk_list']):
+    if tk >= target_epoch_debug:
+        break
+
+post_mannouvre_state = states[idx]
+
+
+print(f'final state: {last_state}')
+print(f'pos norm: {np.linalg.norm(last_state[:3])}')
+print(f'vel norm: {np.linalg.norm(last_state[3:])}')
+
+print(f'final state: {post_mannouvre_state}')
+print(f'pos norm: {np.linalg.norm(post_mannouvre_state[:3])}')
+print(f'vel norm: {np.linalg.norm(post_mannouvre_state[3:])}')
+print(f'''--------------------------------------------------------------------------------------------------------------''')
+print("Computing required dV via back propagation for second method")
+print(f'''--------------------------------------------------------------------------------------------------------------''')
+
+int_params = {}
+int_params['tudat_integrator'] = 'rk4'
+int_params['step'] = -10.
+t_vec = [target_epoch_debug, manoeuvre_epoch]
+
+full_state_history = prop.propagate_orbit(post_mannouvre_state, t_vec, rso_params, int_params)
+Final_state = full_state_history[1][-1,:]
+
+Velocity_needed = np.array(Final_state[3:]).flatten()
+Velocity_currennt = np.array(manouvre_begin_state[3:]).flatten()
+Change = Velocity_needed-Velocity_currennt
+RSW_matrix = astro.frame_conversion.inertial_to_rsw_rotation_matrix(Final_state)
+dv_RSW = np.dot(RSW_matrix.T, Change)
+
+print(f'dV vector {Change} [m/s]')
+print(f'dV in RTN vector {dv_RSW} [m/s]')
+print(f'dV norm {np.linalg.norm(Change)} [m/s]')
+print(f'dV in RTN norm {np.linalg.norm(dv_RSW)} [m/s]')
+print(f'''--------------------------------------------------------------------------------------------------------------''')
 print(f'''--------------------------------------------------------------------------------------------------------------''')
 print("Propagating X0 before maneouvre and X0 after maneouvre for data visualization")
 print(f'''--------------------------------------------------------------------------------------------------------------''')
-t_obj, States_obj = prop.propagate_orbit(X0, t_vec, rso_params, int_params)
+propagated_data = {}
+t0 = (datetime(2025, 4, 1, 12, 0, 0) - datetime(2000, 1, 1, 12, 0, 0)).total_seconds()
+t_vec = np.array([t0,t0+24*3600])
 
-propagated_data['pre-manouvre'] = {
+int_params = {}
+int_params['tudat_integrator'] = 'rkf78'
+int_params['step'] = 10.
+int_params['max_step'] = 1000.
+int_params['min_step'] = 1e-3
+int_params['rtol'] = 1e-12
+int_params['atol'] = 1e-12
+
+current_obj = rso_dict[91000]
+X0 = current_obj['state']
+rso_params = {
+    'mass': current_obj['mass'],
+    'area': current_obj['area'],
+    'Cd': current_obj['Cd'],
+    'Cr': current_obj['Cr'],
+    'sph_deg': 8,
+    'sph_ord': 8,
+    'central_bodies': ['Earth'],
+    'bodies_to_create': ['Earth', 'Sun', 'Moon']
+}
+
+t_obj, States_obj = prop.propagate_orbit(X0, t_vec, rso_params, int_params)
+propagated_data['pre-manouvre orbit'] = {
     'state': States_obj
     }
 
-# propagated_data['manouvre-locationn'] = {
-#     'state': np.array(manouvre_begin_state)
-#     }
-
 t_obj, States_obj = prop.propagate_orbit(best_state, t_vec, rso_params, int_params)
-propagated_data['post-manouvre'] = {
+propagated_data['post-manouvre orbit method-1'] = {
+    'state': States_obj
+    }
+
+t_obj, States_obj = prop.propagate_orbit(last_state, t_vec, rso_params, int_params)
+propagated_data['post-manouvre orbit method-2'] = {
     'state': States_obj
     }
 '''
@@ -567,22 +848,34 @@ def plot_3d_orbit_all(propagated_data):
     print(f'''--------------------------------------------------------------------------------------------------------------''')
     print("Creating a 3D plot")
     print(f'''--------------------------------------------------------------------------------------------------------------''')
+    
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
 
+    # Plot Earth
     _u, _v = np.mgrid[0:2*np.pi:50j, 0:np.pi:40j] 
     _x = 6378000 * np.cos(_u) * np.sin(_v)
     _y = 6378000 * np.sin(_u) * np.sin(_v)
     _z = 6378000 * np.cos(_v)
     ax.plot_wireframe(_x, _y, _z, color="r", alpha=0.5, lw=0.5, zorder=0)
 
+    earth_radius = 6378000 
+
     for obj_id, data in propagated_data.items():
         state = data['state']
-        x, y, z = state[:, 0], state[:, 1], state[:, 2]
+        
+        position_norms = np.linalg.norm(state[:, :3], axis=1)
+        valid_indices = position_norms >= earth_radius
+        
+        filtered_state = state[valid_indices]
+        
+        if filtered_state.shape[0] == 0:
+            continue 
 
+        x, y, z = filtered_state[:, 0], filtered_state[:, 1], filtered_state[:, 2]
         ax.plot(x, y, z, label=f'{obj_id}', linewidth=1.5)
-        ax.scatter(x[0], y[0], z[0], color='green', s=30)
-        ax.scatter(x[-1], y[-1], z[-1], color='red', s=30)
+        ax.scatter(x[0], y[0], z[0], color='green', s=30, label=f'{obj_id} start')
+        ax.scatter(x[-1], y[-1], z[-1], color='red', s=30, label=f'{obj_id} end')
 
     ax.set_xlabel('X [m]')
     ax.set_ylabel('Y [m]')
@@ -591,6 +884,7 @@ def plot_3d_orbit_all(propagated_data):
     ax.legend()
     ax.grid(True)
     plt.tight_layout()
+    plt.savefig('assignment3/images/3d_plot.png',dpi=300)
     plt.show()
 
 def animate_3d_orbit_all(propagated_data, interval=50, save=False, filename='orbits.mp4'):
@@ -648,6 +942,7 @@ def animate_3d_orbit_all(propagated_data, interval=50, save=False, filename='orb
     #     ani.save(filename, writer='ffmpeg')
     # else:
     plt.tight_layout()
+
     plt.show()
 
 plot_3d_orbit_all(propagated_data)
